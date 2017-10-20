@@ -4,11 +4,15 @@ TOOLSET := target
 TARGET := unix_dgram
 DEFS_Debug := \
 	'-DNODE_GYP_MODULE_NAME=unix_dgram' \
+	'-DUSING_UV_SHARED=1' \
+	'-DUSING_V8_SHARED=1' \
+	'-DV8_DEPRECATION_WARNINGS=1' \
 	'-D_LARGEFILE_SOURCE' \
 	'-D_FILE_OFFSET_BITS=64' \
 	'-DBUILDING_NODE_EXTENSION' \
 	'-DDEBUG' \
-	'-D_DEBUG'
+	'-D_DEBUG' \
+	'-DV8_ENABLE_CHECKS'
 
 # Flags passed to all source files.
 CFLAGS_Debug := \
@@ -30,14 +34,17 @@ CFLAGS_CC_Debug := \
 	-std=gnu++0x
 
 INCS_Debug := \
-	-I/home/pi/.node-gyp/4.4.7/include/node \
-	-I/home/pi/.node-gyp/4.4.7/src \
-	-I/home/pi/.node-gyp/4.4.7/deps/uv/include \
-	-I/home/pi/.node-gyp/4.4.7/deps/v8/include \
+	-I/home/pi/.node-gyp/8.7.0/include/node \
+	-I/home/pi/.node-gyp/8.7.0/src \
+	-I/home/pi/.node-gyp/8.7.0/deps/uv/include \
+	-I/home/pi/.node-gyp/8.7.0/deps/v8/include \
 	-I$(srcdir)/node_modules/nan
 
 DEFS_Release := \
 	'-DNODE_GYP_MODULE_NAME=unix_dgram' \
+	'-DUSING_UV_SHARED=1' \
+	'-DUSING_V8_SHARED=1' \
+	'-DV8_DEPRECATION_WARNINGS=1' \
 	'-D_LARGEFILE_SOURCE' \
 	'-D_FILE_OFFSET_BITS=64' \
 	'-DBUILDING_NODE_EXTENSION'
@@ -50,8 +57,6 @@ CFLAGS_Release := \
 	-Wextra \
 	-Wno-unused-parameter \
 	-O3 \
-	-ffunction-sections \
-	-fdata-sections \
 	-fno-omit-frame-pointer
 
 # Flags passed to only C files.
@@ -64,10 +69,10 @@ CFLAGS_CC_Release := \
 	-std=gnu++0x
 
 INCS_Release := \
-	-I/home/pi/.node-gyp/4.4.7/include/node \
-	-I/home/pi/.node-gyp/4.4.7/src \
-	-I/home/pi/.node-gyp/4.4.7/deps/uv/include \
-	-I/home/pi/.node-gyp/4.4.7/deps/v8/include \
+	-I/home/pi/.node-gyp/8.7.0/include/node \
+	-I/home/pi/.node-gyp/8.7.0/src \
+	-I/home/pi/.node-gyp/8.7.0/deps/uv/include \
+	-I/home/pi/.node-gyp/8.7.0/deps/v8/include \
 	-I$(srcdir)/node_modules/nan
 
 OBJS := \

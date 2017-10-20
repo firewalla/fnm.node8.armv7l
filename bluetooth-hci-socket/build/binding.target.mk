@@ -11,7 +11,8 @@ DEFS_Debug := \
 	'-D_FILE_OFFSET_BITS=64' \
 	'-DBUILDING_NODE_EXTENSION' \
 	'-DDEBUG' \
-	'-D_DEBUG'
+	'-D_DEBUG' \
+	'-DV8_ENABLE_CHECKS'
 
 # Flags passed to all source files.
 CFLAGS_Debug := \
@@ -33,11 +34,11 @@ CFLAGS_CC_Debug := \
 	-std=gnu++0x
 
 INCS_Debug := \
-	-I/home/pi/.node-gyp/4.6.1/include/node \
-	-I/home/pi/.node-gyp/4.6.1/src \
-	-I/home/pi/.node-gyp/4.6.1/deps/uv/include \
-	-I/home/pi/.node-gyp/4.6.1/deps/v8/include \
-	-I$(srcdir)/../.2.4.0@nan
+	-I/home/pi/.node-gyp/8.7.0/include/node \
+	-I/home/pi/.node-gyp/8.7.0/src \
+	-I/home/pi/.node-gyp/8.7.0/deps/uv/include \
+	-I/home/pi/.node-gyp/8.7.0/deps/v8/include \
+	-I$(srcdir)/../nan
 
 DEFS_Release := \
 	'-DNODE_GYP_MODULE_NAME=binding' \
@@ -56,8 +57,6 @@ CFLAGS_Release := \
 	-Wextra \
 	-Wno-unused-parameter \
 	-O3 \
-	-ffunction-sections \
-	-fdata-sections \
 	-fno-omit-frame-pointer
 
 # Flags passed to only C files.
@@ -70,11 +69,11 @@ CFLAGS_CC_Release := \
 	-std=gnu++0x
 
 INCS_Release := \
-	-I/home/pi/.node-gyp/4.6.1/include/node \
-	-I/home/pi/.node-gyp/4.6.1/src \
-	-I/home/pi/.node-gyp/4.6.1/deps/uv/include \
-	-I/home/pi/.node-gyp/4.6.1/deps/v8/include \
-	-I$(srcdir)/../.2.4.0@nan
+	-I/home/pi/.node-gyp/8.7.0/include/node \
+	-I/home/pi/.node-gyp/8.7.0/src \
+	-I/home/pi/.node-gyp/8.7.0/deps/uv/include \
+	-I/home/pi/.node-gyp/8.7.0/deps/v8/include \
+	-I$(srcdir)/../nan
 
 OBJS := \
 	$(obj).target/$(TARGET)/src/BluetoothHciSocket.o
