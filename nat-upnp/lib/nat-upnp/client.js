@@ -87,10 +87,13 @@ Client.prototype.getMappings = function getMappings(options, callback) {
       return !end;
     }, function(callback) {
       gateway.run('GetGenericPortMappingEntry', [
-        [ 'NewPortMappingIndex', ++i ]
+        [ 'NewPortMappingIndex', i++ ]
       ], function(err, data) {
         if (err) {
-          end = true;
+          // If we got an error on index 0, ignore it in case this router starts indicies on 1
+          if (i !== 1) {
+            end = true;
+          }
           return callback(null);
         }
 
@@ -114,7 +117,7 @@ Client.prototype.getMappings = function getMappings(options, callback) {
             port: parseInt(data.NewInternalPort, 10)
           },
           protocol: data.NewProtocol.toLowerCase(),
-          enabled: data.NewEnabled === 1,
+          enabled: data.NewEnabled === '1',
           description: data.NewPortMappingDescription,
           ttl: parseInt(data.NewLeaseDuration, 10)
         };
