@@ -105,6 +105,10 @@ Client.prototype.getMappings = function getMappings(options, callback) {
           return true;
         });
         data = data[key];
+	if(!data) {
+	  callback(null)
+          return
+	}
 
         var result = {
           public: {
