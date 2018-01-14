@@ -98,17 +98,20 @@ Client.prototype.getMappings = function getMappings(options, callback) {
         }
 
         var key;
-        Object.keys(data).some(function(k) {
+        var match = Object.keys(data).some(function(k) {
           if (!/:GetGenericPortMappingEntryResponse/.test(k)) return false;
 
           key = k;
           return true;
         });
+
+        // skip if there is no response in the payload
+        if(!match) {
+            callback(null)
+            return
+        }
+
         data = data[key];
-	if(!data) {
-	  callback(null)
-          return
-	}
 
         var result = {
           public: {
