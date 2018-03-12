@@ -1,3 +1,140 @@
+# CHANGELOG
+
+## v3.0.0-rc2 / 2018-03-09
+### MAINTENANCE RESUMES EDITION
+
+- [#1209], (@dabh) Use new version of colors, solving a number of issues.
+- [#1197], (@indexzero) Roadmap & guidelines for contributors.
+- [#1100] Require the package.json by its full name.
+- [#1149] Updates `async` to latest (`2.6.0`)
+- [#1228], (@mcollina) Always pass a function to `fs.close`. 
+- Minor fixes to docs & examples: [#1177], [#1182], [#1208], [#1198], [#1165], [#1110], [#1117], [#1097], [#1155], [#1084], [#1141], [#1210], [#1223].
+
+## v3.0.0-rc1 / 2017-10-19
+### OMG THEY FORGOT TO NAME IT EDITION
+
+ - Fix file transport improper binding of `_onDrain` and `_onError` [#1104](https://github.com/winstonjs/winston/pull/1104)
+
+## v3.0.0-rc0 / 2017-10-02
+### IT'S-DONE.GIF EDITION
+
+**See [UPGRADE-3.0.md](UPGRADE-3.0.md) for a complete & living upgrade guide.**
+
+**See [3.0.0.md](3.0.0.md) for a list of remaining RC tasks.**
+
+- **Rewrite of core logging internals:** `Logger` & `Transport` are now implemented using Node.js `objectMode` streams.
+- **Your transports _should_ not break:** Special attention has been given to ensure backwards compatibility with existing transports. You will likely see this:
+```
+YourTransport is a legacy winston transport. Consider upgrading to winston@3:
+- Upgrade docs: https://github.com/winstonjs/winston/tree/master/UPGRADE.md
+```
+- **`filters`, `rewriters`, and `common.log` are now _formats_:** `winston.format` offers a simple mechanism for user-land formatting & style features. The organic & frankly messy growth of `common.log` is of the past; these feature requests can be implemented entirely outside of `winston` itself.
+``` js
+const { createLogger, format, transports } = require('winston');
+const { combine, timestamp, label, printf } = format;
+
+const myFormat = printf(info => {
+  return `${info.timestamp} [${info.label}] ${info.level}: ${info.message}`;
+});
+
+const logger = createLogger({
+  combine(
+    label({ label: 'right meow!' }),
+    timestamp(),
+    myFormat
+  ),
+  transports: [new transports.Console()]
+});
+```
+- **Increased modularity:** several subsystems are now stand-alone packages:
+  - [logform] exposed as `winston.format`
+  - [winston-transport] exposed as `winston.Transport`
+  - [abstract-winston-transport] used for reusable unit test suites for transport authors.
+- **`2.x` branch will get little to no maintenance:** no feature requests will be accepted – only a limited number of open PRs will be merged. Hoping the [significant performance benefits][perf-bench] incentivizes folks to upgrade quickly. Don't agree? Say something!
+- **No guaranteed support for `node@4` or below:** all code will be migrated to ES6 over time. This release was started when ES5 was still a hard requirement due to the current LTS needs.
+
+## v2.4.0 / 2017-10-01
+### ZOMFG WINSTON@3.0.0-RC0 EDITION
+
+- [#1036] Container.add() 'filters' and 'rewriters' option passing to logger.
+- [#1066] Fixed working of "humanReadableUnhandledException" parameter when additional data is added in meta.
+- [#1040] Added filtering by log level
+- [#1042] Fix regressions brought by `2.3.1`.
+  - Fix regression on array printing.
+  - Fix regression on falsy value.
+- [#977] Always decycle objects before cloning.
+  - Fixes [#862]
+  - Fixes [#474]
+  - Fixes [#914]
+- [57af38a] Missing context in `.lazyDrain` of `File` transport.
+- [178935f] Suppress excessive Node warning from `fs.unlink`.
+- [fcf04e1] Add `label` option to `File` transport docs.
+- [7e736b4], [24300e2] Added more info about undocumented `winston.startTimer()` method.
+- [#1076], [#1082], [#1029], [#989], [e1e7188] Minor grammatical & style updates to `README.md`.
+
+## v2.3.1 / 2017-01-20
+### WELCOME TO THE APOCALYPSE EDITION
+
+- [#868](https://github.com/winstonjs/winston/pull/868), Fix 'Maximum call stack size exceeded' error with custom formatter.
+
+## v2.3.0 / 2016-11-02
+### ZOMG WHY WOULD YOU ASK EDITION
+
+- Full `CHANGELOG.md` entry forthcoming. See [the `git` diff for `2.3.0`](https://github.com/winstonjs/winston/compare/2.2.0...2.3.0) for now.
+
+## v2.2.0 / 2016-02-25
+### LEAVING CALIFORNIA EDITION
+
+- Full `CHANGELOG.md` entry forthcoming. See [the `git` diff for `2.2.0`](https://github.com/winstonjs/winston/compare/2.1.1...2.2.0) for now.
+
+## v2.1.1 / 2015-11-18
+### COLOR ME IMPRESSED EDITION
+
+- [#751](https://github.com/winstonjs/winston/pull/751), Fix colors not appearing in non-tty environments. Fixes [#609](https://github.com/winstonjs/winston/issues/609), [#616](https://github.com/winstonjs/winston/issues/616), [#669](https://github.com/winstonjs/winston/issues/669), [#648](https://github.com/winstonjs/winston/issues/648) (`fiznool`).
+- [#752](https://github.com/winstonjs/winston/pull/752)     Correct syslog RFC number. 5424 instead of 524. (`jbenoit2011`)
+
+## v2.1.0 / 2015-11-03
+### TEST ALL THE ECOSYSTEM EDITION
+
+- [#742](https://github.com/winstonjs/winston/pull/742), [32d52b7](https://github.com/winstonjs/winston/commit/32d52b7) Distribute common test files used by transports in the `winston` ecosystem.
+
+## v2.0.1 / 2015-11-02
+### BUGS ALWAYS HAPPEN OK EDITION
+
+- [#739](https://github.com/winstonjs/winston/issues/739), [1f16861](https://github.com/winstonjs/winston/commit/1f16861) Ensure that `logger.log("info", undefined)` does not throw.
+
+## v2.0.0 / 2015-10-29
+### OMG IT'S MY SISTER'S BIRTHDAY EDITION
+
+#### Breaking changes
+
+**Most important**
+- **[0f82204](https://github.com/winstonjs/winston/commit/0f82204) Move `winston.transports.DailyRotateFile` [into a separate module](https://github.com/winstonjs/winston-daily-rotate-file)**: `require('winston-daily-rotate-file');`
+- **[fb9eec0](https://github.com/winstonjs/winston/commit/fb9eec0) Reverse log levels in `npm` and `cli` configs to conform to [RFC524](https://tools.ietf.org/html/rfc5424). Fixes [#424](https://github.com/winstonjs/winston/pull/424) [#406](https://github.com/winstonjs/winston/pull/406) [#290](https://github.com/winstonjs/winston/pull/290)**
+- **[8cd8368](https://github.com/winstonjs/winston/commit/8cd8368) Change the method signature to a `filter` function to be consistent with `rewriter` and log functions:**
+``` js
+function filter (level, msg, meta, inst) {
+  // Filter logic goes here...
+}
+```
+
+**Other breaking changes**
+- [e0c9dde](https://github.com/winstonjs/winston/commit/e0c9dde) Remove `winston.transports.Webhook`. Use `winston.transports.Http` instead.
+- [f71e638](https://github.com/winstonjs/winston/commit/f71e638) Remove `Logger.prototype.addRewriter` and `Logger.prototype.addFilter` since they just push to an Array of functions. Use `logger.filters.push` or `logger.rewriters.push` explicitly instead.
+- [a470ab5](https://github.com/winstonjs/winston/commit/a470ab5) No longer respect the `handleExceptions` option to `new winston.Logger`. Instead just pass in the `exceptionHandlers` option itself.
+- [8cb7048](https://github.com/winstonjs/winston/commit/8cb7048) Removed `Logger.prototype.extend` functionality
+
+#### New features
+- [3aa990c](https://github.com/winstonjs/winston/commit/3aa990c) Added `Logger.prototype.configure` which now contains all logic previously in the `winston.Logger` constructor function. (`indexzero`)
+- [#726](https://github.com/winstonjs/winston/pull/726) Update .npmignore (`coreybutler`)
+- [#700](https://github.com/winstonjs/winston/pull/700) Add an `eol` option to the `Console` transport. (`aquavitae`)
+- [#731](https://github.com/winstonjs/winston/pull/731) Update `lib/transports.js` for better static analysis. (`indexzero`)
+
+#### Fixes, refactoring, and optimizations. OH MY!
+- [#632](https://github.com/winstonjs/winston/pull/632) Allow `File` transport to be an `objectMode` writable stream. (`stambata`)
+- [#527](https://github.com/winstonjs/winston/issues/527), [163f4f9](https://github.com/winstonjs/winston/commit/163f4f9), [3747ccf](https://github.com/winstonjs/winston/commit/3747ccf) Performance optimizations and string interpolation edge cases (`indexzero`)
+- [f0edafd](https://github.com/winstonjs/winston/commit/f0edafd) Code cleanup for reability, ad-hoc styleguide enforcement (`indexzero`)
+
 ## v1.1.1 - v1.1.2 / 2015-10
 ### MINOR FIXES EDITION
 

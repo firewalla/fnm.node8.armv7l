@@ -1,220 +1,341 @@
+'use strict';
+
+const stream = require('stream');
+const util = require('util');
+const asyncForEach = require('async/forEach');
+const { LEVEL } = require('triple-beam');
+const isStream = require('isstream');
+const ExceptionHandler = require('./exception-handler');
+const LegacyTransportStream = require('winston-transport/legacy');
+const Profiler = require('./profiler');
+const common = require('./common');
+const config = require('./config');
+
+const formatRegExp = common.formatRegExp;
+
 /*
- * logger.js: Core logger object used by winston.
- *
- * (C) 2010 Charlie Robbins
- * MIT LICENCE
- *
+ * Constructor function for the Logger object responsible
+ * for persisting log messages and metadata to one or more transports.
  */
-
-var events = require('events'),
-    util = require('util'),
-    async = require('async'),
-    config = require('./config'),
-    common = require('./common'),
-    exception = require('./exception'),
-    Stream = require('stream').Stream;
+var Logger = module.exports = function Logger(options) {
+  stream.Transform.call(this, { objectMode: true });
+  this.configure(options);
+};
 
 //
-// ### function Logger (options)
-// #### @options {Object} Options for this instance.
-// Constructor function for the Logger object responsible
-// for persisting log messages and metadata to one or more transports.
+// Inherit from `stream.Transform`.
 //
-var Logger = exports.Logger = function (options) {
-  events.EventEmitter.call(this);
-  options = options || {};
+util.inherits(Logger, stream.Transform);
 
-  var self = this,
-      handleExceptions = false;
-
+/*
+ * ### function configure (options)
+ * This will wholesale reconfigure this instance by:
+ * 1. Resetting all transports. Older transports will be removed implicitly.
+ * 2. Set all other options including levels, colors, rewriters, filters,
+ *    exceptionHandlers, etc.
+ */
+Logger.prototype.configure = function (options) {
   //
-  // Set Levels and default logging level
+  // Reset transports if we already have them
   //
-  this.padLevels = options.padLevels || false;
-  this.setLevels(options.levels);
-  if (options.colors) {
-    config.addColors(options.colors);
+  if (this.transports.length) {
+    this.clear();
   }
+
+  options = options || {};
+  this.format = options.format || this.format || require('logform/json')();
+
+  var levels = options.levels || this.levels || config.npm.levels;
+  var maxLength = Math.max.apply(null, Object.keys(levels)
+    .map(function (lev) { return lev.length; }));
+
+  this.paddings = Object.keys(levels).reduce(function (acc, lev) {
+    var pad = lev.length !== maxLength
+      ? new Array(maxLength - lev.length + 1).join(' ')
+      : '';
+
+    acc[lev] = pad;
+    return acc;
+  }, {});
 
   //
   // Hoist other options onto this instance.
   //
-  this.level       = options.level || 'info';
-  this.emitErrs    = options.emitErrs || false;
-  this.stripColors = options.stripColors || false;
+  this.levels = levels;
+  this.level = options.level || 'info';
+  this.exceptions = new ExceptionHandler(this);
+  this.profilers = {};
   this.exitOnError = typeof options.exitOnError !== 'undefined'
     ? options.exitOnError
     : true;
 
   //
-  // Setup other intelligent default settings.
+  // Add all transports we have been provided.
   //
-  this.transports        = {};
-  this.rewriters         = [];
-  this.filters           = [];
-  this.exceptionHandlers = {};
-  this.profilers         = {};
-  this._names            = [];
-  this._hnames           = [];
-
   if (options.transports) {
-    options.transports.forEach(function (transport) {
-      self.add(transport, null, true);
+    options.transports = Array.isArray(options.transports)
+      ? options.transports
+      : [options.transports];
 
-      if (transport.handleExceptions) {
-        handleExceptions = true;
-      }
-    });
+    options.transports.forEach(function (transport) {
+      this.add(transport);
+    }, this);
   }
 
-  if (options.rewriters) {
-    options.rewriters.forEach(function (rewriter) {
-      self.addRewriter(rewriter);
-    });
+  if (options.colors || options.emitErrs || options.formatters
+    || options.padLevels || options.rewriters || options.stripColors) {
+    throw new Error([
+      '{ colors, emitErrs, formatters, padLevels, rewriters, stripColors } were removed in winston@3.0.0.',
+      'Use a custom winston.format(function) instead.',
+      'See: https://github.com/winstonjs/winston/tree/master/UPGRADING.md'
+    ].join('\n'));
   }
 
   if (options.exceptionHandlers) {
-    handleExceptions = true;
-    options.exceptionHandlers.forEach(function (handler) {
-      self._hnames.push(handler.name);
-      self.exceptionHandlers[handler.name] = handler;
-    });
-  }
-
-  if (options.handleExceptions || handleExceptions) {
-    this.handleExceptions();
+    this.exceptions.handle(options.exceptionHandlers);
   }
 };
 
-//
-// Inherit from `events.EventEmitter`.
-//
-util.inherits(Logger, events.EventEmitter);
+/*
+ * @property {Array} Represents the current readableState
+ * pipe targets for this Logger instance.
+ */
+Object.defineProperty(Logger.prototype, 'transports', {
+  configurable: false,
+  enumerable: true,
+  get: function () {
+    var pipes = this._readableState.pipes;
+    return !Array.isArray(pipes)
+      ? [pipes].filter(Boolean)
+      : pipes;
+  }
+});
 
-//
-// ### function extend (target)
-// #### @target {Object} Target to extend.
-// Extends the target object with a 'log' method
-// along with a method for each level in this instance.
-//
-Logger.prototype.extend = function (target) {
-  var self = this;
-  ['log', 'profile', 'startTimer'].concat(Object.keys(this.levels)).forEach(function (method) {
-    target[method] = function () {
-      return self[method].apply(self, arguments);
-    };
-  });
+/*
+ * function log (level, msg, meta)
+ * function log (info)
+ * Ensure backwards compatibility with a `log` method
+ *
+ * Supports the existing API, which is now DEPRECATED:
+ *
+ *    logger.log('info', 'Hello world', { custom: true });
+ *    logger.log('info', new Error('Yo, it's on fire'));
+ *    logger.log('info', '%s %d%%', 'A string', 50, { thisIsMeta: true });
+ *
+ * And the new API with a single JSON literal:
+ *
+ *    logger.log({ level: 'info', message: 'Hello world', custom: true });
+ *    logger.log({ level: 'info', message: new Error('Yo, it's on fire') });
+ *    logger.log({
+ *      level: 'info',
+ *      message: '%s %d%%',
+ *      splat: ['A string', 50],
+ *      meta: { thisIsMeta: true }
+ *    });
+ *
+ * @api public
+ */
+Logger.prototype.log = function log(level, msg, meta) {
+  //
+  // Optimize for the hotpath of logging JSON literals
+  //
+  if (arguments.length === 1) {
+    //
+    // Yo dawg, I heard you like levels ... seriously ...
+    // In this context the LHS `level` here is actually
+    // the `info` so read this as:
+    // info[LEVEL] = info.level;
+    //
+    level[LEVEL] = level.level;
+    this.write(level);
+    return this;
+  }
+
+  //
+  // Slightly less hotpath, but worth optimizing for.
+  //
+  if (arguments.length === 2) {
+    this.write({ [LEVEL]: level, level, message: msg });
+    return this;
+  }
+
+  //
+  // Separation of the splat from { level, message, meta } must be done
+  // at this point in the objectMode stream since we only ever write
+  // a single object.
+  //
+  const tokens = msg && msg.match && msg.match(formatRegExp);
+  if (tokens) {
+    this._splat({ [LEVEL]: level, level, message: msg }, tokens, Array.prototype.slice.call(arguments, 2));
+    return this;
+  }
+
+  const info = Object.assign({}, meta, { [LEVEL]: level, level, message: msg });
+  this.write(info);
+  return this;
+};
+
+/*
+ * @private function _transform (obj)
+ * Pushes data so that it can be picked up by all of
+ * our pipe targets.
+ */
+Logger.prototype._transform = function _transform(info, enc, callback) {
+  //
+  // [LEVEL] is only soft guaranteed to be set here since we are a proper
+  // stream. It is likely that `info` came in through `.log(info)` or
+  // `.info(info)`. If it is not defined, however, define it.
+  // This LEVEL symbol is provided by `triple-beam` and also used in:
+  // - logform
+  // - winston-transport
+  // - abstract-winston-transport
+  //
+  if (!info[LEVEL]) {
+    info[LEVEL] = info.level;
+  }
+
+  //
+  // Remark: really not sure what to do here, but this has been
+  // reported as very confusing by pre winston@2.0.0 users as
+  // quite confusing when using custom levels.
+  //
+  if (!this.levels[info[LEVEL]] && this.levels[info[LEVEL]] !== 0) {
+    console.error('[winston] Unknown logger level: %s', info[LEVEL]);
+  }
+
+  //
+  // Remark: not sure if we should simply error here.
+  //
+  if (!this._readableState.pipes) {
+    console.error('[winston] Attempt to write logs with no transports %j', info);
+  }
+
+  //
+  // Here we write to the `format` pipe-chain, which
+  // on `readable` above will push the formatted `info`
+  // Object onto the buffer for this instance.
+  //
+  this.push(this.format.transform(info, this.format.options));
+  callback();
+};
+
+/*
+ * @private function _splat (info, tokens, splat)
+ * Check to see if tokens <= splat.length, assign { splat, meta } into the `info`
+ * accordingly, and write to this instance.
+ */
+Logger.prototype._splat = function _splat(info, tokens, splat) {
+  const percents = info.message.match(common.escapedPercent);
+  const escapes = percents && percents.length || 0;
+
+  //
+  // The expected splat is the number of tokens minus the number of escapes. e.g.
+  //
+  // - { expectedSplat: 3 } '%d %s %j'
+  // - { expectedSplat: 5 } '[%s] %d%% %d%% %s %j'
+  //
+  // Any "meta" will be arugments in addition to the expected splat size
+  // regardless of type. e.g.
+  //
+  // logger.log('info', '%d%% %s %j', 100, 'wow', { such: 'js' }, { thisIsMeta: true });
+  // would result in splat of four (4), but only three (3) are expected. Therefore:
+  //
+  // extraSplat = 3 - 4 = -1
+  // metas = [100, 'wow', { such: 'js' }, { thisIsMeta: true }].splice(-1, -1 * -1);
+  // splat = [100, 'wow', { such: 'js' }]
+  //
+  const expectedSplat = tokens.length - escapes;
+  const extraSplat = expectedSplat - splat.length;
+  const metas = extraSplat < 0
+    ? splat.splice(extraSplat, -1 * extraSplat)
+    : [];
+
+  //
+  // Now that { splat } has been separated from any potential { meta }
+  // we can assign this to the `info` object and write it to our format stream.
+  //
+  info.splat = splat;
+  if (metas.length) {
+    info.meta = metas[0];
+  }
+
+  this.write(info);
+};
+
+/*
+ * function add (transport)
+ * Adds the transport to this logger instance by
+ * piping to it.
+ */
+Logger.prototype.add = function add(transport) {
+  //
+  // Support backwards compatibility with all existing
+  // `winston@1.x.x` transport. All NEW transports should
+  // inherit from `winston.TransportStream`.
+  //
+  var target = !isStream(transport)
+    ? new LegacyTransportStream({ transport: transport })
+    : transport;
+
+  if (!target._writableState || !target._writableState.objectMode) {
+    throw new Error('Transports must WritableStreams in objectMode. Set { objectMode: true }.');
+  }
+
+  //
+  // Listen for the `error` event on the new Transport
+  //
+  this._onError(target);
+  this.pipe(target);
+
+  if (transport.handleExceptions) {
+    this.exceptions.handle();
+  }
 
   return this;
 };
 
-//
-// ### function log (level, msg, [meta], callback)
-// #### @level {string} Level at which to log the message.
-// #### @msg {string} Message to log
-// #### @meta {Object} **Optional** Additional metadata to attach
-// #### @callback {function} Continuation to respond to when complete.
-// Core logging method exposed to Winston. Metadata is optional.
-//
-Logger.prototype.log = function (level) {
-  var self = this,
-      args = Array.prototype.slice.call(arguments, 1);
-
-  while(args[args.length - 1] === null) {
-    args.pop();
+/*
+ * function remove (transport)
+ * Removes the transport from this logger instance by
+ * unpiping from it.
+ */
+Logger.prototype.remove = function remove(transport) {
+  var target = transport;
+  if (!isStream(transport)) {
+    target = this.transports.filter(function (match) {
+      return match.transport === transport;
+    })[0];
   }
 
-  var callback = typeof args[args.length - 1] === 'function' ? args.pop() : null,
-      meta     = typeof args[args.length - 1] === 'object' && Object.prototype.toString.call(args[args.length - 1]) !== '[object RegExp]' ? args.pop() : {},
-      msg      = util.format.apply(null, args);
-
-  // If we should pad for levels, do so
-  if (this.padLevels) {
-    msg = new Array(this.levelLength - level.length + 1).join(' ') + msg;
-  }
-
-  function onError (err) {
-    if (callback) {
-      callback(err);
-    }
-    else if (self.emitErrs) {
-      self.emit('error', err);
-    }
-  }
-
-
-  if (Object.keys(this.transports).length === 0) {
-    return onError(new Error('Cannot log with no transports.'));
-  }
-  else if (typeof self.levels[level] === 'undefined') {
-    return onError(new Error('Unknown log level: ' + level));
-  }
-
-  this.rewriters.forEach(function (rewriter) {
-    meta = rewriter(level, msg, meta, self);
-  });
-
-  this.filters.forEach(function(filter) {
-    var filtered = filter(msg, meta, level, self);
-    if (typeof filtered === 'string')
-      msg = filtered;
-    else {
-      msg = filtered.msg;
-      meta = filtered.meta;
-    }
-  });
-
-  //
-  // For consideration of terminal 'color" programs like colors.js,
-  // which can add ANSI escape color codes to strings, we destyle the
-  // ANSI color escape codes when `this.stripColors` is set.
-  //
-  // see: http://en.wikipedia.org/wiki/ANSI_escape_code
-  //
-  if (this.stripColors) {
-    var code = /\u001b\[(\d+(;\d+)*)?m/g;
-    msg = ('' + msg).replace(code, '');
-  }
-
-  //
-  // Log for each transport and emit 'logging' event
-  //
-  function emit(name, next) {
-    var transport = self.transports[name];
-    if ((transport.level && self.levels[transport.level] <= self.levels[level])
-      || (!transport.level && self.levels[self.level] <= self.levels[level])) {
-      transport.log(level, msg, meta, function (err) {
-        if (err) {
-          err.transport = transport;
-          cb(err);
-          return next();
-        }
-        self.emit('logging', transport, level, msg, meta);
-        next();
-      });
-    } else {
-      next();
-    }
-  }
-
-  //
-  // Respond to the callback
-  //
-  function cb(err) {
-    if (callback) {
-      if (err) return callback(err);
-      callback(null, level, msg, meta);
-    }
-    callback = null;
-    if (!err) {
-      self.emit('logged', level, msg, meta);
-    }
-  }
-
-  async.forEach(this._names, emit, cb);
-
+  if (target) { this.unpipe(target); }
   return this;
 };
+
+/*
+ * function clear (transport)
+ * Removes all transports from this logger instance.
+ */
+Logger.prototype.clear = function clear() {
+  this.unpipe();
+  return this;
+};
+
+/*
+ * ### function close ()
+ * Cleans up resources (streams, event listeners) for all
+ * transports associated with this instance (if necessary).
+ */
+Logger.prototype.close = function close() {
+  this.clear();
+  this.emit('close');
+  return this;
+};
+
+/*
+ * Sets the `target` levels specified on this instance.
+ * @param {Object} Target levels to use on this instance.
+ */
+Logger.prototype.setLevels = common.warn.deprecated('setLevels');
 
 //
 // ### function query (options, callback)
@@ -224,17 +345,15 @@ Logger.prototype.log = function (level) {
 // This will aggregate each transport's results into one object containing
 // a property per transport.
 //
-Logger.prototype.query = function (options, callback) {
+Logger.prototype.query = function query(options, callback) {
   if (typeof options === 'function') {
     callback = options;
     options = {};
   }
 
-  var self = this,
-      options = options || {},
-      results = {},
-      query = common.clone(options.query) || {},
-      transports;
+  options = options || {};
+  const results = {};
+  const query = common.clone(options.query) || {};
 
   //
   // Helper function to query a single transport
@@ -257,7 +376,7 @@ Logger.prototype.query = function (options, callback) {
   // Helper function to accumulate the results from
   // `queryTransport` into the `results`.
   //
-  function addResults (transport, next) {
+  function addResults(transport, next) {
     queryTransport(transport, function (err, result) {
       //
       // queryTransport could potentially invoke the callback
@@ -269,6 +388,7 @@ Logger.prototype.query = function (options, callback) {
           results[transport.name] = result;
         }
 
+        // eslint-disable-next-line callback-return
         next();
       }
 
@@ -277,28 +397,12 @@ Logger.prototype.query = function (options, callback) {
   }
 
   //
-  // If an explicit transport is being queried then
-  // respond with the results from only that transport
-  //
-  if (options.transport) {
-    options.transport = options.transport.toLowerCase();
-    return queryTransport(this.transports[options.transport], callback);
-  }
-
-  //
-  // Create a list of all transports for this instance.
-  //
-  transports = this._names.map(function (name) {
-    return self.transports[name];
-  }).filter(function (transport) {
-    return !!transport.query;
-  });
-
-  //
   // Iterate over the transports in parallel setting the
   // appropriate key in the `results`
   //
-  async.forEach(transports, addResults, function () {
+  asyncForEach(this.transports.filter(function (transport) {
+    return !!transport.query;
+  }), addResults, function () {
     callback(null, results);
   });
 };
@@ -308,20 +412,11 @@ Logger.prototype.query = function (options, callback) {
 // #### @options {Object} Stream options for this instance.
 // Returns a log stream for all transports. Options object is optional.
 //
-Logger.prototype.stream = function (options) {
-  var self = this,
-      options = options || {},
-      out = new Stream,
-      streams = [],
-      transports;
+Logger.prototype.stream = function stream(options) {
+  options = options || {};
 
-  if (options.transport) {
-    var transport = this.transports[options.transport];
-    delete options.transport;
-    if (transport && transport.stream) {
-      return transport.stream(options);
-    }
-  }
+  const out = new stream.Stream();
+  const streams = [];
 
   out._streams = streams;
   out.destroy = function () {
@@ -332,13 +427,9 @@ Logger.prototype.stream = function (options) {
   //
   // Create a list of all transports for this instance.
   //
-  transports = this._names.map(function (name) {
-    return self.transports[name];
-  }).filter(function (transport) {
+  this.transports.filter(function (transport) {
     return !!transport.stream;
-  });
-
-  transports.forEach(function (transport) {
+  }).forEach(function (transport) {
     var stream = transport.stream(options);
     if (!stream) return;
 
@@ -361,341 +452,111 @@ Logger.prototype.stream = function (options) {
 };
 
 //
-// ### function close ()
-// Cleans up resources (streams, event listeners) for all
-// transports associated with this instance (if necessary).
+// ### function startTimer ()
+// Returns an object corresponding to a specific timing. When done
+// is called the timer will finish and log the duration. e.g.:
 //
-Logger.prototype.close = function () {
-  var self = this;
-
-  this._names.forEach(function (name) {
-    var transport = self.transports[name];
-    if (transport && transport.close) {
-      transport.close();
-    }
-  });
-
-  this.emit('close');
+//    timer = winston.startTimer()
+//    setTimeout(function(){
+//      timer.done({ message: 'Logging message' });
+//    }, 1000);
+//
+Logger.prototype.startTimer = function startTimer() {
+  return new Profiler(this);
 };
 
 //
-// ### function handleExceptions ()
-// Handles `uncaughtException` events for the current process
-//
-Logger.prototype.handleExceptions = function () {
-  var args = Array.prototype.slice.call(arguments),
-      handlers = [],
-      self = this;
-
-  args.forEach(function (a) {
-    if (Array.isArray(a)) {
-      handlers = handlers.concat(a);
-    }
-    else {
-      handlers.push(a);
-    }
-  });
-
-  handlers.forEach(function (handler) {
-    self.exceptionHandlers[handler.name] = handler;
-  });
-
-  this._hnames = Object.keys(self.exceptionHandlers);
-
-  if (!this.catchExceptions) {
-    this.catchExceptions = this._uncaughtException.bind(this);
-    process.on('uncaughtException', this.catchExceptions);
-  }
-};
-
-//
-// ### function unhandleExceptions ()
-// Removes any handlers to `uncaughtException` events
-// for the current process
-//
-Logger.prototype.unhandleExceptions = function () {
-  var self = this;
-
-  if (this.catchExceptions) {
-    Object.keys(this.exceptionHandlers).forEach(function (name) {
-      var handler = self.exceptionHandlers[name];
-      if (handler.close) {
-        handler.close();
-      }
-    });
-
-    this.exceptionHandlers = {};
-    Object.keys(this.transports).forEach(function (name) {
-      var transport = self.transports[name];
-      if (transport.handleExceptions) {
-        transport.handleExceptions = false;
-      }
-    })
-
-    process.removeListener('uncaughtException', this.catchExceptions);
-    this.catchExceptions = false;
-  }
-};
-
-//
-// ### function add (transport, [options])
-// #### @transport {Transport} Prototype of the Transport object to add.
-// #### @options {Object} **Optional** Options for the Transport to add.
-// #### @instance {Boolean} **Optional** Value indicating if `transport` is already instantiated.
-// Adds a transport of the specified type to this instance.
-//
-Logger.prototype.add = function (transport, options, created) {
-  var instance = created ? transport : (new (transport)(options));
-
-  if (!instance.name && !instance.log) {
-    throw new Error('Unknown transport with no log() method');
-  }
-  else if (this.transports[instance.name]) {
-    throw new Error('Transport already attached: ' + instance.name);
-  }
-
-  this.transports[instance.name] = instance;
-  this._names = Object.keys(this.transports);
-
-  //
-  // Listen for the `error` event on the new Transport
-  //
-  instance._onError = this._onError.bind(this, instance)
-  if (!created) {
-    instance.on('error', instance._onError);
-  }
-
-  //
-  // If this transport has `handleExceptions` set to `true`
-  // and we are not already handling exceptions, do so.
-  //
-  if (instance.handleExceptions && !this.catchExceptions) {
-    this.handleExceptions();
-  }
-
-  return this;
-};
-
-//
-// ### function addRewriter (transport, [options])
-// #### @transport {Transport} Prototype of the Transport object to add.
-// #### @options {Object} **Optional** Options for the Transport to add.
-// #### @instance {Boolean} **Optional** Value indicating if `transport` is already instantiated.
-// Adds a transport of the specified type to this instance.
-//
-Logger.prototype.addRewriter = function (rewriter) {
-  this.rewriters.push(rewriter);
-}
-
-//
-// ### function addFilter (filter)
-// #### @filter {function} Filter function, called with the message and
-// optional metadata as the two arguments.
-// Expected to return either the filtered message or an object with properties:
-//   - msg = the filtered message string
-//   - meta = the filtered metadata object
-//
-Logger.prototype.addFilter = function (filter) {
-  this.filters.push(filter);
-}
-
-//
-// ### function clear ()
-// Remove all transports from this instance
-//
-Logger.prototype.clear = function () {
-  for (var name in this.transports) {
-    this.remove({ name: name });
-  }
-};
-
-//
-// ### function remove (transport)
-// #### @transport {Transport|String} Transport or Name to remove.
-// Removes a transport of the specified type from this instance.
-//
-Logger.prototype.remove = function (transport) {
-  var name = typeof transport !== 'string'
-    ? transport.name || transport.prototype.name
-    : transport;
-
-  if (!this.transports[name]) {
-    throw new Error('Transport ' + name + ' not attached to this instance');
-  }
-
-  var instance = this.transports[name];
-  delete this.transports[name];
-  this._names = Object.keys(this.transports);
-
-  if (instance.close) {
-    instance.close();
-  }
-
-  if (instance._onError) {
-    instance.removeListener('error', instance._onError);
-  }
-  return this;
-};
-
-var ProfileHandler = function (logger) {
-  this.logger = logger;
-
-  this.start = Date.now();
-
-  this.done = function (msg) {
-    var args, callback, meta;
-    args     = Array.prototype.slice.call(arguments);
-    callback = typeof args[args.length - 1] === 'function' ? args.pop() : null;
-    meta     = typeof args[args.length - 1] === 'object' ? args.pop() : {};
-
-    meta.durationMs = (Date.now()) - this.start;
-
-    return this.logger.info(msg, meta, callback);
-  }
-}
-
-Logger.prototype.startTimer = function () {
-  return new ProfileHandler(this);
-}
-
-//
-// ### function profile (id, [msg, meta, callback])
-// #### @id {string} Unique id of the profiler
-// #### @msg {string} **Optional** Message to log
-// #### @meta {Object} **Optional** Additional metadata to attach
-// #### @callback {function} **Optional** Continuation to respond to when complete.
+// ### function profile (id, [info])
+// @param {string} id Unique id of the profiler
 // Tracks the time inbetween subsequent calls to this method
 // with the same `id` parameter. The second call to this method
 // will log the difference in milliseconds along with the message.
 //
-Logger.prototype.profile = function (id) {
-  var now = Date.now(), then, args,
-      msg, meta, callback;
+Logger.prototype.profile = function profile(id) {
+  const time = Date.now();
+  let timeEnd;
+  let info;
+  let args;
 
   if (this.profilers[id]) {
-    then = this.profilers[id];
+    timeEnd = this.profilers[id];
     delete this.profilers[id];
 
-    // Support variable arguments: msg, meta, callback
-    args     = Array.prototype.slice.call(arguments);
-    callback = typeof args[args.length - 1] === 'function' ? args.pop() : null;
-    meta     = typeof args[args.length - 1] === 'object' ? args.pop() : {};
-    msg      = args.length === 2 ? args[1] : id;
-
-    // Set the duration property of the metadata
-    meta.durationMs = now - then;
-    return this.info(msg, meta, callback);
-  }
-  else {
-    this.profilers[id] = now;
-  }
-
-  return this;
-};
-
-//
-// ### function setLevels (target)
-// #### @target {Object} Target levels to use on this instance
-// Sets the `target` levels specified on this instance.
-//
-Logger.prototype.setLevels = function (target) {
-  return common.setLevels(this, this.levels, target);
-};
-
-//
-// ### function cli ()
-// Configures this instance to have the default
-// settings for command-line interfaces: no timestamp,
-// colors enabled, padded output, and additional levels.
-//
-Logger.prototype.cli = function () {
-  this.padLevels = true;
-  this.setLevels(config.cli.levels);
-  config.addColors(config.cli.colors);
-
-  if (this.transports.console) {
-    this.transports.console.colorize = this.transports.console.colorize || true;
-    this.transports.console.timestamp = this.transports.console.timestamp || false;
-  }
-
-  return this;
-};
-
-//
-// ### @private function _uncaughtException (err)
-// #### @err {Error} Error to handle
-// Logs all relevant information around the `err` and
-// exits the current process.
-//
-Logger.prototype._uncaughtException = function (err) {
-  var self = this,
-      responded = false,
-      info = exception.getAllInfo(err),
-      handlers = this._getExceptionHandlers(),
-      timeout,
-      doExit;
-
-  //
-  // Calculate if we should exit on this error
-  //
-  doExit = typeof this.exitOnError === 'function'
-    ? this.exitOnError(err)
-    : this.exitOnError;
-
-  function logAndWait(transport, next) {
-    transport.logException('uncaughtException: ' + (err.message || err), info, next, err);
-  }
-
-  function gracefulExit() {
-    if (doExit && !responded) {
-      //
-      // Remark: Currently ignoring any exceptions from transports
-      //         when catching uncaught exceptions.
-      //
-      clearTimeout(timeout);
-      responded = true;
-      process.exit(1);
+    //
+    // Attempt to be kind to users if they are still
+    // using older APIs.
+    //
+    args = Array.prototype.slice.call(arguments, 1);
+    if (typeof args[args.length - 1] === 'function') {
+      console.warn('Callback function no longer supported as of winston@3.0.0');
+      args.pop();
     }
+
+    //
+    // Set the duration property of the metadata
+    //
+    info = typeof args[args.length - 1] === 'object' ? args.pop() : {};
+    info.level = info.level || 'info';
+    info.durationMs = time - timeEnd;
+    info.message = info.message || id;
+    return this.write(info);
   }
 
-  if (!handlers || handlers.length === 0) {
-    return gracefulExit();
-  }
+  this.profilers[id] = time;
+  return this;
+};
 
-  //
-  // Log to all transports and allow the operation to take
-  // only up to `3000ms`.
-  //
-  async.forEach(handlers, logAndWait, gracefulExit);
-  if (doExit) {
-    timeout = setTimeout(gracefulExit, 3000);
-  }
+/*
+ * Backwards compatibility to `exceptions.handle`
+ * in winston < 3.0.0.
+ *
+ * @api deprecated
+ */
+Logger.prototype.handleExceptions = function handleExceptions() {
+  console.warn('Deprecated: .handleExceptions() will be removed in winston@4. Use .exceptions.handle()');
+  var args = Array.prototype.slice.call(arguments);
+  this.exceptions.handle.apply(this.exceptions, args);
+};
+
+/*
+ * Backwards compatibility to `exceptions.handle`
+ * in winston < 3.0.0.
+ *
+ * @api deprecated
+ */
+Logger.prototype.unhandleExceptions = function unhandleExceptions() {
+  console.warn('Deprecated: .unhandleExceptions() will be removed in winston@4. Use .unexceptions.handle()');
+  var args = Array.prototype.slice.call(arguments);
+  this.exceptions.unhandle.apply(this.exceptions, args);
+};
+
+/*
+ * Throw a more meaningful deprecation notice
+ */
+Logger.prototype.cli = function cli() {
+  throw new Error([
+    'Logger.cli() was removed in winston@3.0.0',
+    'Use a custom winston.formats.cli() instead.',
+    'See: https://github.com/winstonjs/winston/tree/master/UPGRADING.md'
+  ].join('\n'));
 };
 
 //
-// ### @private function _getExceptionHandlers ()
-// Returns the list of transports and exceptionHandlers
-// for this instance.
-//
-Logger.prototype._getExceptionHandlers = function () {
-  var self = this;
-
-  return this._hnames.map(function (name) {
-    return self.exceptionHandlers[name];
-  }).concat(this._names.map(function (name) {
-    return self.transports[name].handleExceptions && self.transports[name];
-  })).filter(Boolean);
-};
-
-//
-// ### @private function _onError (transport, err)
+// ### @private function _onError (transport)
 // #### @transport {Object} Transport on which the error occured
 // #### @err {Error} Error that occurred on the transport
 // Bubbles the error, `err`, that occured on the specified `transport`
 // up from this instance if `emitErrs` has been set.
 //
-Logger.prototype._onError = function (transport, err) {
-  if (this.emitErrs) {
-    this.emit('error', err, transport);
+Logger.prototype._onError = function _onError(transport) {
+  var self = this;
+
+  function transportError(err) {
+    self.emit('error', err, transport);
+  }
+
+  if (!transport.__winstonError) {
+    transport.__winstonError = transportError;
+    transport.on('error', transport.__winstonError);
   }
 };
