@@ -6,8 +6,9 @@
  *
  */
 
-const createLogger = require('./create-logger');
-const extend = require('util')._extend;
+var common = require('./common'),
+    winston = require('../winston'),
+    extend = require('util')._extend;
 
 //
 // ### function Container (options)
@@ -18,6 +19,14 @@ const extend = require('util')._extend;
 var Container = exports.Container = function (options) {
   this.loggers = {};
   this.options = options || {};
+  this.default = {
+    transports: [
+      new winston.transports.Console({
+        level: 'silly',
+        colorize: false
+      })
+    ]
+  }
 };
 
 //
@@ -28,26 +37,47 @@ var Container = exports.Container = function (options) {
 // an instance does not exist, one is created.
 //
 Container.prototype.get = Container.prototype.add = function (id, options) {
-  const self = this;
-  let existing;
+  var self = this,
+      existing;
 
   if (!this.loggers[id]) {
     //
     // Remark: Simple shallow clone for configuration options in case we pass in
     // instantiated protoypal objects
     //
-    options = extend({}, options || this.options);
+    options = extend({}, options || this.options || this.default);
     existing = options.transports || this.options.transports;
-
     //
     // Remark: Make sure if we have an array of transports we slice it to make copies
     // of those references.
     //
     options.transports = existing ? existing.slice() : [];
 
-    this.loggers[id] = createLogger(options);
+    if (options.transports.length === 0 && (!options || !options['console'])) {
+      options.transports.push(this.default.transports[0]);
+    }
+
+    Object.keys(options).forEach(function (key) {
+      if (key === 'transports' || key === 'filters' || key === 'rewriters') {
+        return;
+      }
+
+      var name = common.capitalize(key);
+
+      if (!winston.transports[name]) {
+        throw new Error('Cannot add unknown transport: ' + name);
+      }
+
+      var namedOptions = options[key];
+      namedOptions.id = id;
+      options.transports.push(new (winston.transports[name])(namedOptions));
+    });
+
+    options.id = id;
+    this.loggers[id] = new winston.Logger(options);
+
     this.loggers[id].on('close', function () {
-      self._delete(id);
+        self._delete(id);
     });
   }
 
@@ -73,7 +103,7 @@ Container.prototype.has = function (id) {
 Container.prototype.close = function (id) {
   var self = this;
 
-  function removeLogger(id) {
+  function _close (id) {
     if (!self.loggers[id]) {
       return;
     }
@@ -82,11 +112,9 @@ Container.prototype.close = function (id) {
     self._delete(id);
   }
 
-  if (id) {
-    return removeLogger(id);
-  }
-
-  Object.keys(this.loggers).forEach(removeLogger);
+  return id ? _close(id) : Object.keys(this.loggers).forEach(function (id) {
+    _close(id);
+  });
 };
 
 //
@@ -95,6 +123,6 @@ Container.prototype.close = function (id) {
 // Deletes a `Logger` instance with the specified `id`.
 //
 Container.prototype._delete = function (id) {
-  delete this.loggers[id];
-};
+    delete this.loggers[id];
+}
 

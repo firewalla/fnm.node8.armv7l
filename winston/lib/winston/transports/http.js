@@ -1,10 +1,9 @@
-'use strict';
-
-const util = require('util');
-const http = require('http');
-const https = require('https');
-const Stream = require('stream').Stream;
-const TransportStream = require('winston-transport');
+var util = require('util'),
+    winston = require('../../winston'),
+    http = require('http'),
+    https = require('https'),
+    Stream = require('stream').Stream,
+    Transport = require('./transport').Transport;
 
 //
 // ### function Http (options)
@@ -12,8 +11,8 @@ const TransportStream = require('winston-transport');
 // Constructor function for the Http transport object responsible
 // for persisting log messages and metadata to a terminal or TTY.
 //
-var Http = module.exports = function (options) {
-  TransportStream.call(this, options);
+var Http = exports.Http = function (options) {
+  Transport.call(this, options);
   options = options || {};
 
   this.name = 'http';
@@ -23,15 +22,13 @@ var Http = module.exports = function (options) {
   this.auth = options.auth;
   this.path = options.path || '';
   this.agent = options.agent;
-  this.headers = options.headers || {};
-  this.headers['content-type'] = 'application/json';
 
   if (!this.port) {
     this.port = this.ssl ? 443 : 80;
   }
 };
 
-util.inherits(Http, TransportStream);
+util.inherits(Http, winston.Transport);
 
 //
 // Expose the name of this Transport on the prototype
@@ -39,32 +36,100 @@ util.inherits(Http, TransportStream);
 Http.prototype.name = 'http';
 
 //
-// ### function log (meta)
-// #### @meta {Object} **Optional** Additional metadata to attach
-// Core logging method exposed to Winston.
+// ### function _request (options, callback)
+// #### @callback {function} Continuation to respond to when complete.
+// Make a request to a winstond server or any http server which can
+// handle json-rpc.
 //
-Http.prototype.log = function (info, callback) {
-  var self = this;
+Http.prototype._request = function (options, callback) {
+  options = options || {};
 
-  this._request(info, function (err, res) {
-    if (res && res.statusCode !== 200) {
-      err = new Error('Invalid HTTP Status Code: ' + res.statusCode);
-    }
+  var auth = options.auth || this.auth,
+      path = options.path || this.path || '',
+      req;
 
-    if (err) {
-      self.emit('warn', err);
-    } else {
-      self.emit('logged', info);
-    }
+  delete options.auth;
+  delete options.path;
+
+  // Prepare options for outgoing HTTP request
+  req = (this.ssl ? https : http).request({
+    host: this.host,
+    port: this.port,
+    path: '/' + path.replace(/^\//, ''),
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    agent: this.agent,
+    auth: (auth) ? auth.username + ':' + auth.password : ''
   });
 
-  //
-  // Remark: (jcrugzz) Fire and forget here so requests dont cause buffering
-  // and block more requests from happening?
-  //
-  if (callback) {
-    setImmediate(callback);
+  req.on('error', callback);
+  req.on('response', function (res) {
+    var body = '';
+
+    res.on('data', function (chunk) {
+      body += chunk;
+    });
+
+    res.on('end', function () {
+      callback(null, res, body);
+    });
+
+    res.resume();
+  });
+
+  req.end(new Buffer(JSON.stringify(options), 'utf8'));
+};
+
+//
+// ### function log (level, msg, [meta], callback)
+// #### @level {string} Level at which to log the message.
+// #### @msg {string} Message to log
+// #### @meta {Object} **Optional** Additional metadata to attach
+// #### @callback {function} Continuation to respond to when complete.
+// Core logging method exposed to Winston. Metadata is optional.
+//
+Http.prototype.log = function (level, msg, meta, callback) {
+  var self = this;
+
+  if (typeof meta === 'function') {
+    callback = meta;
+    meta = {};
   }
+
+  var options = {
+    method: 'collect',
+    params: {
+      level: level,
+      message: msg,
+      meta: meta
+    }
+  };
+
+  if (meta) {
+    if (meta.path) {
+      options.path = meta.path;
+      delete meta.path;
+    }
+
+    if (meta.auth) {
+      options.auth = meta.auth;
+      delete meta.auth;
+    }
+  }
+
+  this._request(options, function (err, res) {
+    if (res && res.statusCode !== 200) {
+      err = new Error('HTTP Status Code: ' + res.statusCode);
+    }
+
+    if (err) return callback(err);
+
+    // TODO: emit 'logged' correctly,
+    // keep track of pending logs.
+    self.emit('logged');
+
+    if (callback) callback(null, true);
+  });
 };
 
 //
@@ -79,7 +144,9 @@ Http.prototype.query = function (options, callback) {
     options = {};
   }
 
-  options = this.normalizeQuery(options);
+  var self = this,
+      options = this.normalizeQuery(options);
+
   options = {
     method: 'query',
     params: options
@@ -121,8 +188,15 @@ Http.prototype.query = function (options, callback) {
 //
 Http.prototype.stream = function (options) {
   options = options || {};
+  
+  var self = this,
+      stream = new Stream,
+      req,
+      buff;
 
-  const stream = new Stream();
+  stream.destroy = function () {
+    req.destroy();
+  };
 
   options = {
     method: 'stream',
@@ -139,17 +213,13 @@ Http.prototype.stream = function (options) {
     delete options.params.auth;
   }
 
-  let buff = '';
-  const req = this._request(options);
-
-  stream.destroy = function () {
-    req.destroy();
-  };
+  req = this._request(options);
+  buff = '';
 
   req.on('data', function (data) {
-    data = (buff + data).split(/\n+/);
-    const l = data.length - 1;
-    let i = 0;
+    var data = (buff + data).split(/\n+/),
+        l = data.length - 1,
+        i = 0;
 
     for (; i < l; i++) {
       try {
@@ -167,40 +237,4 @@ Http.prototype.stream = function (options) {
   });
 
   return stream;
-};
-
-//
-// ### function _request (options, callback)
-// #### @callback {function} Continuation to respond to when complete.
-// Make a request to a winstond server or any http server which can
-// handle json-rpc.
-//
-Http.prototype._request = function (options, callback) {
-  options = options || {};
-
-  const auth = options.auth || this.auth;
-  const path = options.path || this.path || '';
-
-  delete options.auth;
-  delete options.path;
-
-  // Prepare options for outgoing HTTP request
-  const req = (this.ssl ? https : http).request({
-    method: 'POST',
-    host: this.host,
-    port: this.port,
-    path: '/' + path.replace(/^\//, ''),
-    headers: this.headers,
-    auth: auth ? (auth.username + ':' + auth.password) : '',
-    agent: this.agent
-  });
-
-  req.on('error', callback);
-  req.on('response', function (res) {
-    res.on('end', function () {
-      callback(null, res);
-    }).resume();
-  });
-
-  req.end(new Buffer(JSON.stringify(options), 'utf8'));
 };
