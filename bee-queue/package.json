@@ -1,0 +1,95 @@
+{
+  "name": "bee-queue",
+  "version": "1.2.2",
+  "description": "A simple, fast, robust job/task queue, backed by Redis.",
+  "main": "index.js",
+  "dependencies": {
+    "promise-callbacks": "^3.0.0",
+    "redis": "^2.7.1"
+  },
+  "devDependencies": {
+    "ava": "^0.21.0",
+    "ava-spec": "^1.1.0",
+    "coveralls": "^2.11.2",
+    "eslint": ">= 3",
+    "lolex": "^2.0.0",
+    "nyc": "^11.0.3",
+    "sandboxed-module": "^2.0.3",
+    "sinon": "^2.3.8"
+  },
+  "files": [
+    "HISTORY.md",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "index.js",
+    "index.d.ts",
+    "lib"
+  ],
+  "scripts": {
+    "test": "npm run eslint && ava",
+    "eslint": "eslint lib/ test/",
+    "coverage": "nyc ava",
+    "report": "npm run coverage && nyc report --reporter=html",
+    "coverage-and-publish": "npm run coverage && nyc report --reporter=text-lcov | coveralls",
+    "ci": "npm run eslint && npm run coverage-and-publish"
+  },
+  "keywords": [
+    "task",
+    "job",
+    "queue",
+    "worker",
+    "distributed",
+    "system",
+    "redis",
+    "lua"
+  ],
+  "engines": {
+    "node": ">= 4"
+  },
+  "author": {
+    "name": "Lewis J Ellis",
+    "email": "me@lewisjellis.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bee-queue/bee-queue.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bee-queue/bee-queue/issues"
+  },
+  "homepage": "https://github.com/bee-queue/bee-queue",
+  "gitHead": "9cd6a3fa62bad01e445c0ea13a67a1a8e52fe414",
+  "_id": "bee-queue@1.2.2",
+  "_npmVersion": "5.5.1",
+  "_nodeVersion": "8.9.1",
+  "_npmUser": {
+    "name": "lewisjellis",
+    "email": "me@lewisjellis.com"
+  },
+  "dist": {
+    "integrity": "sha512-Nw6VXHkAdfnMEp5bdffTSZEBnHuZSoRLjwmurfaQp6xmcxP+XsaqKClH1/XLmoAkrOuW40j9mLGlsLR/25ljwQ==",
+    "shasum": "ad82226de14f42fed4b86b066b18c4829ffd3600",
+    "tarball": "https://registry.npmjs.org/bee-queue/-/bee-queue-1.2.2.tgz"
+  },
+  "maintainers": [
+    {
+      "name": "skeggse",
+      "email": "skeggse@gmail.com"
+    },
+    {
+      "name": "lewisjellis",
+      "email": "me@lewisjellis.com"
+    }
+  ],
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages",
+    "tmp": "tmp/bee-queue-1.2.2.tgz_1516909538762_0.1339190066792071"
+  },
+  "directories": {},
+  "_shasum": "ad82226de14f42fed4b86b066b18c4829ffd3600",
+  "_resolved": "https://registry.npmjs.org/bee-queue/-/bee-queue-1.2.2.tgz",
+  "_from": "bee-queue@latest",
+  "readme": "ERROR: No README data found!"
+}
