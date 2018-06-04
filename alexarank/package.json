@@ -1,0 +1,71 @@
+{
+  "name": "alexarank",
+  "version": "0.2.0",
+  "description": "A simple node package to get Alexa traffic rank for a domain or URL",
+  "files": [
+    "index.js",
+    "lib",
+    "bin"
+  ],
+  "main": "index.js",
+  "bin": {
+    "alexarank": "./bin/alexarank"
+  },
+  "scripts": {
+    "test": "mocha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fcambus/alexarank.git"
+  },
+  "keywords": [
+    "alexa",
+    "api",
+    "traffic",
+    "rank"
+  ],
+  "author": {
+    "name": "Frederic Cambus",
+    "url": "http://www.cambus.net"
+  },
+  "license": "BSD-2-Clause",
+  "bugs": {
+    "url": "https://github.com/fcambus/alexarank/issues"
+  },
+  "dependencies": {
+    "es6-promise": "^4.0.5",
+    "isomorphic-fetch": "^2.2.1",
+    "xml2js": "^0.4.17"
+  },
+  "devDependencies": {
+    "mocha": "^3.1.2",
+    "should": "^11.1.1"
+  },
+  "gitHead": "7ea9eb5f437e0907b3d29eda10e4bbed78a332cc",
+  "homepage": "https://github.com/fcambus/alexarank#readme",
+  "_id": "alexarank@0.2.0",
+  "_shasum": "48c22a519ef12c51dff34f907ece27c8d222761c",
+  "_from": "alexarank@latest",
+  "_npmVersion": "2.15.8",
+  "_nodeVersion": "4.4.7",
+  "_npmUser": {
+    "name": "fcambus",
+    "email": "fcambus@users.sourceforge.net"
+  },
+  "maintainers": [
+    {
+      "name": "fcambus",
+      "email": "fcambus@users.sourceforge.net"
+    }
+  ],
+  "dist": {
+    "shasum": "48c22a519ef12c51dff34f907ece27c8d222761c",
+    "tarball": "https://registry.npmjs.org/alexarank/-/alexarank-0.2.0.tgz"
+  },
+  "_npmOperationalInternal": {
+    "host": "packages-18-east.internal.npmjs.com",
+    "tmp": "tmp/alexarank-0.2.0.tgz_1477383283580_0.0872956223320216"
+  },
+  "directories": {},
+  "_resolved": "https://registry.npmjs.org/alexarank/-/alexarank-0.2.0.tgz"
+}
